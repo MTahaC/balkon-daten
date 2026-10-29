@@ -53,3 +53,31 @@ def test_main_writes_manifest_analysis_and_display_features(tmp_path, monkeypatc
     assert sorted(ids) == sorted(b["id"] for b in analysis["buildings"])
     # The cached CityGML stays unless --delete-downloads is given.
     assert (cache / TILE.file_name).exists()
+
+
+def test_all_tiles_in_shards(tmp_path, monkeypatch, capsys):
+    """--all --shard I/N: every portal tile in exactly one shard; NRW coverage."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    tiles = [TILE, TileId(356, 5645), TileId(357, 5644)]
+    for t in tiles:
+        shutil.copy(FIXTURE, cache / t.file_name)
+    size = (cache / TILE.file_name).stat().st_size
+    index = {t.file_name: IndexEntry(size, "2026-07-01T00:00:00") for t in tiles}
+    monkeypatch.setattr(cli, "load_index", lambda _cache: index)
+
+    seen = []
+    for i in range(2):
+        out = tmp_path / f"out{i}"
+        cli.main(
+            [
+                "--all", "--shard", f"{i}/2", "--retries", "0",
+                "--cache", str(cache), "--out", str(out), "--work", str(tmp_path / f"w{i}"),
+                "--jobs", "1", "--skip-tiles", "--skip-basemap", "--skip-addresses",
+            ]
+        )  # fmt: skip
+        manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["coverage"] == "Nordrhein-Westfalen"
+        assert sorted(p.stem for p in (out / "analysis").glob("*.json")) == manifest["tiles"]
+        seen += manifest["tiles"]
+    assert sorted(seen) == sorted(t.key for t in tiles)

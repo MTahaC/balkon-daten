@@ -56,3 +56,17 @@ add `CLOUDFLARE_API_TOKEN` (Account → Cloudflare Pages → Edit) and
 `CLOUDFLARE_ACCOUNT_ID` as secrets of the environment `data-pages` (Settings →
 Environments), which only `main` can use. The app reads the data from there
 once its repository variable `DATA_BASE_URL` points to the site.
+
+## All of NRW
+
+`Data NRW` (`.github/workflows/data-nrw.yml`, started by hand) builds the
+analysis tiles of every NRW tile as a matrix: `lod2pipe --all --shard I/N`
+splits the portal's tiles into N runs of about equal CityGML size in
+Hilbert order (24 shards ≈ 9 GB each), and each shard packs its own v3
+pieces (`lod2pipe.pack`). At most `parallel` shards (default 8) download
+from the portal at once; downloads are retried 8 times with backoff. Each
+shard uploads `analysis-shard-<i>` (pieces, index, manifest; 14 days), and
+the summary job adds up tiles, pieces, size and the slowest shard. A failed
+shard can be re-run on its own ("Re-run failed jobs"). Merging the shards
+into a data release, with the address index per municipality, is a
+separate step.

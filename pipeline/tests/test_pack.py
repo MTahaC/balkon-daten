@@ -146,3 +146,23 @@ def test_piece_names_depend_only_on_content(tmp_path):
     # Packing again replaces the old pieces instead of adding to them.
     pack.pack_release(tmp_path / "a")
     assert len(list((tmp_path / "a" / pack.PIECE_DIR).iterdir())) == len(first["pieces"])
+
+
+def test_shards_cover_every_tile_once_in_runs_of_similar_size():
+    keys = [f"{e}_{n}" for e in range(330, 360) for n in range(5640, 5670)]
+    # a dense "city" in one corner, small rural tiles elsewhere
+    sizes = {k: 40 if k.startswith("33") else 2 for k in keys}
+    shards = [pack.shard(sizes, i, 6) for i in range(6)]
+    assert sorted(k for s in shards for k in s) == sorted(keys)
+    totals = [sum(sizes[k] for k in s) for s in shards]
+    assert max(totals) - min(totals) <= 2 * max(sizes.values())
+    # each shard is one run of the Hilbert order, so it packs on its own
+    order = sorted(keys, key=pack._tile_order)
+    for s in shards:
+        start = order.index(s[0])
+        assert order[start : start + len(s)] == s
+
+
+def test_shard_refuses_an_index_outside_the_count():
+    with pytest.raises(ValueError):
+        pack.shard({"356_5644": 1}, 3, 3)

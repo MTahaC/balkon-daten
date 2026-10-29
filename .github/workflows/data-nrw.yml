@@ -1,0 +1,146 @@
+name: Data NRW
+
+# Builds the analysis tiles (format v3) for every LoD2 tile in NRW as a
+# parallel matrix: the tiles are split into shards of about equal CityGML
+# size, consecutive in Hilbert order, and each shard packs its own pieces
+# (lod2pipe --all --shard I/N, then lod2pipe.pack). Each shard uploads its
+# pieces and index as an artifact; a later assemble step merges them into a
+# data release with the address index. Started by hand only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: Number of shards (about 9 GB of CityGML each at 24)
+        default: '24'
+        required: true
+      parallel:
+        description: Shards running at the same time (be gentle with the portal)
+        default: '8'
+        required: true
+
+concurrency:
+  group: data-nrw
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.list.outputs.shards }}
+    steps:
+      - id: list
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          case "$SHARDS" in ''|*[!0-9]*) echo "::error::shards must be a number"; exit 1;; esac
+          echo "shards=$(seq 0 $((SHARDS - 1)) | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  shard:
+    needs: plan
+    runs-on: ubuntu-24.04
+    # GitHub's limit for one job; a shard takes about 15-30 minutes.
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.parallel) }}
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      SHARD: ${{ matrix.shard }}/${{ inputs.shards }}
+    defaults:
+      run:
+        shell: bash # -eo pipefail: a failing command before | tee fails the step
+    steps:
+      - run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Only Python is needed (no tippecanoe, no pmtiles CLI).
+      - name: Python venv
+        working-directory: pipeline
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet --require-hashes -r requirements.txt
+
+      - name: Build analysis tiles
+        working-directory: pipeline
+        run: >-
+          .venv/bin/python -m lod2pipe
+          --all --shard "$SHARD"
+          --retries 8
+          --jobs 4
+          --delete-downloads
+          --skip-tiles --skip-basemap --skip-addresses
+          --work "$RUNNER_TEMP/work"
+          --out "$RUNNER_TEMP/shard"
+
+      - name: Pack
+        working-directory: pipeline
+        run: .venv/bin/python -m lod2pipe.pack "$RUNNER_TEMP/shard" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The v2 JSON tiles stay behind; only pieces, index and manifest go on.
+      - name: Collect
+        run: |
+          i="${SHARD%/*}"
+          dir="$RUNNER_TEMP/artifact/shard-$i"
+          mkdir -p "$dir/analysis"
+          mv "$RUNNER_TEMP/shard/analysis/pieces" "$RUNNER_TEMP/shard/analysis/index.json" "$dir/analysis/"
+          mv "$RUNNER_TEMP/shard/manifest.json" "$dir/"
+          jq -n --arg shard "$SHARD" \
+            --argjson tiles "$(jq '.tiles | length' "$dir/analysis/index.json")" \
+            --argjson pieces "$(ls "$dir/analysis/pieces" | wc -l)" \
+            --argjson bytes "$(du -sb "$dir" | cut -f1)" \
+            --argjson largest "$(find "$dir" -type f -printf '%s\n' | sort -n | tail -1)" \
+            --argjson seconds "$(( $(date +%s) - JOB_START ))" \
+            '{$shard, $tiles, $pieces, $bytes, $largest, $seconds}' > "$RUNNER_TEMP/stats-$i.json"
+          echo "SHARD_NO=$i" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: analysis-shard-${{ env.SHARD_NO }}
+          path: ${{ runner.temp }}/artifact
+          retention-days: 14
+          compression-level: 0 # pieces are gzip already
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stats-${{ env.SHARD_NO }}
+          path: ${{ runner.temp }}/stats-${{ env.SHARD_NO }}.json
+          retention-days: 14
+
+  summary:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Totals and Pages limits
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern 'stats-*' --dir stats
+          jq -s '{
+              shards: length,
+              tiles: (map(.tiles) | add),
+              pieces: (map(.pieces) | add),
+              mb: ((map(.bytes) | add) / 1e6 | floor),
+              largest_kib: ((map(.largest) | max) / 1024 | floor),
+              slowest_shard_min: ((map(.seconds) | max) / 60 | floor)
+            }' stats/*/*.json | tee totals.json
+          {
+            echo "### NRW analysis build"
+            echo
+            echo "- shards done: $(jq .shards totals.json) of ${{ inputs.shards }}"
+            echo "- tiles: $(jq .tiles totals.json), pieces: $(jq .pieces totals.json), $(jq .mb totals.json) MB"
+            echo "- largest file: $(jq .largest_kib totals.json) KiB (Pages: 25 MiB)"
+            echo "- slowest shard: $(jq .slowest_shard_min totals.json) min"
+            echo "- Pages files for this release: about $(( $(jq .pieces totals.json) + 10 )) (limit 20,000 per site, both served releases and _headers)"
+          } >> "$GITHUB_STEP_SUMMARY"

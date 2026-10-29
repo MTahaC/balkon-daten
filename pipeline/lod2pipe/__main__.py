@@ -25,6 +25,7 @@ from pyproj import Transformer
 from . import addresses, basemap
 from .export import open_geojsonseq, write_json
 from .fetch import load_index
+from .pack import shard
 from .process import process_tile
 from .tiles import BASE_URL, TileId, read_tile_list, tiles_in_bbox, with_neighbours
 
@@ -69,9 +70,26 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="UTM32 bounding box in metres (EPSG:25832)",
     )
     sel.add_argument(
+        "--all",
+        action="store_true",
+        help="every tile in the portal index (all of NRW); combine with --shard",
+    )
+    sel.add_argument(
         "--municipality",
         help="every tile with an address in this municipality (Gebäudereferenzen name, "
         'e.g. "Köln") plus one ring of neighbour tiles, so shading near the border is complete',
+    )
+    p.add_argument(
+        "--shard",
+        metavar="I/N",
+        help="only shard I of N (0-based): consecutive tiles in Hilbert order with "
+        "about equal CityGML size, for parallel jobs; each shard packs its own pieces",
+    )
+    p.add_argument(
+        "--retries",
+        type=int,
+        default=5,
+        help="download retries per tile, backing off 2, 4, 8, … s (default: 5)",
     )
     p.add_argument(
         "--release",
@@ -121,7 +139,23 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _select_tiles(args: argparse.Namespace, available: set[str]) -> list[TileId]:
+def _select_tiles(args: argparse.Namespace, index: dict) -> list[TileId]:
+    tiles = _selection(args, set(index))
+    if args.shard:
+        try:
+            i, n = (int(v) for v in args.shard.split("/"))
+            keys = set(shard({t.key: index[t.file_name].size for t in tiles}, i, n))
+        except ValueError as err:
+            sys.exit(f"--shard {args.shard}: {err}")
+        tiles = [t for t in tiles if t.key in keys]
+    if not tiles:
+        sys.exit("No tiles selected")
+    return tiles
+
+
+def _selection(args: argparse.Namespace, available: set[str]) -> list[TileId]:
+    if args.all:
+        return sorted(TileId.parse(name) for name in available)
     if args.bbox or args.municipality:
         if args.municipality:
             gebref = addresses.read_gebref(addresses.fetch_gebref(args.cache))
@@ -138,8 +172,6 @@ def _select_tiles(args: argparse.Namespace, available: set[str]) -> list[TileId]
         missing = [t.key for t in tiles if t.file_name not in available]
         if missing:
             sys.exit(f"Tiles not in the portal index: {', '.join(missing)}")
-    if not tiles:
-        sys.exit("No tiles selected")
     return tiles
 
 
@@ -215,7 +247,8 @@ def _process_tiles(
             yield f
 
     jobs = [
-        (t, args.cache, index[t.file_name].size, args.out, args.delete_downloads) for t in tiles
+        (t, args.cache, index[t.file_name].size, args.out, args.delete_downloads, args.retries)
+        for t in tiles
     ]
     with open_geojsonseq(geojsonseq) as write:
         if args.jobs <= 1:
@@ -246,7 +279,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"-- {label}: {time.monotonic() - started:.0f} s since start", flush=True)
 
     index = load_index(args.cache)
-    tiles = _select_tiles(args, set(index))
+    tiles = _select_tiles(args, index)
     total_mb = sum(index[t.file_name].size for t in tiles) / 1e6
     print(f"{len(tiles)} tiles, {total_mb:.0f} MB CityGML, {args.jobs} jobs")
 
@@ -265,7 +298,7 @@ def main(argv: list[str] | None = None) -> None:
         # Files live under releases/<release>/ on R2; null for a local build.
         "release": args.release,
         # Shown to people outside the data ("Gebäudedaten gibt es bisher für …").
-        "coverage": args.municipality,
+        "coverage": "Nordrhein-Westfalen" if args.all else args.municipality,
         "bounds": _wgs84_bounds(tiles),
         "tiles": [t.key for t in tiles],
         "pmtiles": None if args.skip_tiles else PMTILES_NAME,
