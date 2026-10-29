@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: pipeline
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: pipeline/.python-version
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+      - run: python -m venv .venv && .venv/bin/pip install --quiet --require-hashes -r requirements.txt
+      - run: .venv/bin/ruff check . && .venv/bin/ruff format --check .
+      - run: .venv/bin/pytest -q
+      # Known vulnerabilities in any pinned package.
+      - uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
+        with:
+          inputs: pipeline/requirements.txt
+          require-hashes: true

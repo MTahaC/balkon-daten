@@ -1,0 +1,5 @@
+# NRW LoD2 tiles to process: one "<E km>_<N km>" key per line (EPSG:25832).
+# Look up keys in https://www.opengeodata.nrw.de/produkte/geobasis/3dg/lod2_gml/lod2_gml/index.json
+
+356_5644  # Köln: contains the city's reference point (Altstadt, Rathaus, Heumarkt, Rhine)
+355_5644  # Köln Innenstadt west (Neumarkt, Rudolfplatz): dense block structure, mixed heights

@@ -1,0 +1,19 @@
+{
+  "_comment": "Values the pipeline (Python) and the app (TypeScript) must agree on. Both test suites check their constants against this file; see docs/data-contract.md.",
+  "tileSizeM": 1000,
+  "neighbourRings": 1,
+  "horizonRadiusM": 300,
+  "tileMarginM": 100,
+  "analysisFormat": "balkon-lod2-prisms",
+  "analysisVersion": 2,
+  "addressFormat": "balkon-addresses",
+  "addressVersion": 1,
+  "displayLayer": "buildings",
+  "pieceSize": 65536,
+  "pieceExample": {
+    "archive": "buildings.pmtiles",
+    "index": 7,
+    "path": "buildings.pmtiles.chunks/000007.bin"
+  },
+  "systemLoss": 0.14
+}

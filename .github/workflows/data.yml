@@ -1,0 +1,113 @@
+name: Data
+
+# Builds a data release (buildings, basemap, analysis tiles, addresses) for
+# one municipality, cuts the PMTiles archives into 64 KiB pieces for static
+# hosting on Cloudflare Pages and publishes it as the asset of a GitHub
+# release "data-<id>". The app repository's Deploy puts the newest data
+# release into the site. Started by hand only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      municipality:
+        description: Municipality as named in the Gebäudereferenzen
+        default: Köln
+        required: true
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the data release
+
+jobs:
+  data:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      MUNICIPALITY: ${{ inputs.municipality || 'Köln' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The tools are installed fresh on every run, not restored from the
+      # Actions cache: a cached tippecanoe build can't be checked against a
+      # known checksum, and this job holds a write token.
+      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: pipeline/setup.sh
+
+      # Only the Gebäudereferenzen zip (~100 MB) is cached; it is re-downloaded
+      # when its size in the portal index changes. CityGML tiles are deleted
+      # as soon as they are processed (8.5 GB for Köln, 14 GB runner disk).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: pipeline/.cache/gebref_EPSG25832_ASCII.zip
+          key: gebref-${{ hashFiles('pipeline/lod2pipe/addresses.py') }}
+
+      - name: Test pipeline
+        working-directory: pipeline
+        run: .venv/bin/pytest -q
+
+      - name: Release id
+        run: echo "RELEASE=$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build data
+        working-directory: pipeline
+        run: >-
+          .venv/bin/python -m lod2pipe
+          --municipality "$MUNICIPALITY"
+          --release "$RELEASE"
+          --jobs 3
+          --delete-downloads
+          --work "$RUNNER_TEMP/work"
+          --out "$RUNNER_TEMP/release"
+
+      - name: Cut archives into pieces
+        working-directory: pipeline
+        run: .venv/bin/python -m lod2pipe.chunks "$RUNNER_TEMP/release" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The asset holds releases/<id>/…, the layout below /data/ on the site.
+      - name: Package and check Pages limits
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg/releases"
+          mv "$RUNNER_TEMP/release" "$RUNNER_TEMP/pkg/releases/$RELEASE"
+          dir="$RUNNER_TEMP/pkg/releases/$RELEASE"
+          files=$(find "$dir" -type f | wc -l)
+          largest=$(find "$dir" -type f -printf '%s\n' | sort -n | tail -1)
+          analysis=$(du -sb "$dir/analysis" | cut -f1)
+          {
+            echo "### Release $RELEASE ($MUNICIPALITY)"
+            echo
+            echo "- files: $files (Pages allows 20,000 per site, including the app)"
+            echo "- largest file: $((largest / 1024)) KiB (Pages: 25 MiB)"
+            echo "- analysis tiles: $(ls "$dir/analysis" | wc -l), $((analysis / 1000000)) MB"
+            echo "- addresses.json: $(( $(stat -c %s "$dir/addresses.json") / 1000 )) kB"
+            echo "- total: $(du -sh "$dir" | cut -f1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$files" -gt 19000 ] || [ "$largest" -gt $((25 * 1024 * 1024)) ]; then
+            echo "::error::Release exceeds Cloudflare Pages limits (files or file size)."
+            exit 1
+          fi
+          tar -C "$RUNNER_TEMP/pkg" -czf "$RUNNER_TEMP/data-$RELEASE.tar.gz" releases
+          echo "- asset: $(du -h "$RUNNER_TEMP/data-$RELEASE.tar.gz" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish data release
+        run: |
+          gh release create "data-$RELEASE" "$RUNNER_TEMP/data-$RELEASE.tar.gz" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Data $RELEASE ($MUNICIPALITY)" \
+            --notes "Data release for $MUNICIPALITY, built from ${GITHUB_SHA::7}. Deploy uses the newest data-* release."
+
+      # Older than 30 days and neither the new nor the previous release.
+      - name: Remove old data releases
+        run: |
+          cutoff=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh release list --limit 200 --json tagName,createdAt \
+            -q '[.[] | select(.tagName | startswith("data-"))] | sort_by(.createdAt) | reverse | .[2:][]
+                | select(.createdAt < "'"$cutoff"'") | .tagName' |
+            while read -r tag; do
+              echo "removing $tag"
+              gh release delete "$tag" --yes --cleanup-tag
+            done
+

@@ -1,0 +1,9 @@
+# Direct dependencies. requirements.txt is generated from this file with
+# every dependency pinned and hashed; after a change run:
+#   uv pip compile requirements.in --python-version 3.12 --python-platform x86_64-manylinux_2_39 --generate-hashes -o requirements.txt
+lxml==6.1.3
+numpy==2.5.4
+pyproj==3.8.0
+shapely==2.2.0
+pytest==9.1.1
+ruff==0.17.2

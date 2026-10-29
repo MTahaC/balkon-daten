@@ -1,0 +1,15 @@
+# Pipeline
+pipeline/.venv*/
+pipeline/.cache/
+pipeline/out/
+out/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

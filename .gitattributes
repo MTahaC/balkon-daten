@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.png binary
+*.gml text eol=lf
+# Golden contract files are compared byte for byte (pipeline and app tests).
+contract/fixtures/** -text

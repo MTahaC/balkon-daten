@@ -1,0 +1,19 @@
+# Monthly, one grouped PR per ecosystem for minor and patch updates; majors
+# as separate PRs. Merge only with green CI.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /pipeline
+    schedule:
+      interval: monthly
+    groups:
+      pipeline-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
