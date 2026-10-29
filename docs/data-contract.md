@@ -105,7 +105,8 @@ SHA-256.
 }
 ```
 
-Decoding gives exactly the v2 values (cm integers divided by 100), so v2
+Decoding gives exactly the v2 values (cm integers divided by 100; a v2
+`-0.0` comes back as `0`), so v2
 and v3 give identical horizons. Releases carry both while app versions
 without v3 are still in use.
 
