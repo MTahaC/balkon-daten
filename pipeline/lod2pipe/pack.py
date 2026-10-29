@@ -243,6 +243,25 @@ def hilbert_index(e: int, n: int) -> int:
     return d
 
 
+def shard(sizes: dict[str, int], index: int, count: int) -> list[str]:
+    """Tile keys of shard ``index`` of ``count``: consecutive runs in Hilbert
+    order with about the same input size each (``sizes``: key -> bytes), so
+    every shard packs into pieces of its own and parallel jobs take about as
+    long. Every key lands in exactly one shard."""
+    if not 0 <= index < count:
+        raise ValueError(f"shard {index} of {count}")
+    keys = sorted(sizes, key=_tile_order)
+    total = sum(sizes.values())
+    out: list[str] = []
+    before = 0
+    for key in keys:
+        # The shard a tile belongs to is decided by where its first byte falls.
+        if min(before * count // max(total, 1), count - 1) == index:
+            out.append(key)
+        before += sizes[key]
+    return out
+
+
 def _tile_order(key: str) -> tuple[int, str]:
     e, n = (int(v) for v in key.split("_"))
     return hilbert_index(e, n), key

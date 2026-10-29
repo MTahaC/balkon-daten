@@ -13,12 +13,12 @@ from .tiles import TileId
 
 
 def process_tile(
-    tile: TileId, cache: Path, size: int, out: Path, delete_download: bool
+    tile: TileId, cache: Path, size: int, out: Path, delete_download: bool, retries: int = 5
 ) -> tuple[str, list[dict[str, Any]]]:
     """Fetch and parse one tile, write its analysis JSON; return the report
     line and the display features. Runs in a worker process,
     so it lives outside ``__main__`` (spawned workers must be able to import it)."""
-    path = fetch_tile(tile, cache, size)
+    path = fetch_tile(tile, cache, size, retries=retries)
     stats = ParseStats()
     prisms = list(parse_prisms(path, stats))
     write_json(out / "analysis" / f"{tile.key}.json", analysis_tile(tile, prisms))
