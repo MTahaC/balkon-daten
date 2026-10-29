@@ -1,0 +1,73 @@
+name: Data Deploy
+
+# Puts the newest two data releases (GitHub releases "data-<id>") on the
+# Cloudflare Pages project "balkon-daten": releases/<id>/… plus site/_headers.
+# Two, so app versions still built for the previous release keep working
+# until they update. Runs after a successful Data run on main, or by hand.
+# Needs the secrets CLOUDFLARE_API_TOKEN (Account > Cloudflare Pages > Edit)
+# and CLOUDFLARE_ACCOUNT_ID in the environment "data-pages", which only
+# main may use.
+
+on:
+  workflow_run:
+    workflows: [Data]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: data-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    environment: data-pages
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Assemble the site from the newest data releases
+        run: |
+          mkdir -p "$RUNNER_TEMP/site" "$RUNNER_TEMP/dl"
+          cp site/_headers "$RUNNER_TEMP/site/"
+          tags=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt \
+            -q '[.[] | select(.tagName | startswith("data-"))] | sort_by(.createdAt) | reverse | .[0:2][] | .tagName')
+          if [ -z "$tags" ]; then
+            echo "::error::No data-* release: run Data first."
+            exit 1
+          fi
+          for tag in $tags; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/dl"
+            tar -C "$RUNNER_TEMP/site" -xzf "$RUNNER_TEMP/dl/$tag.tar.gz"
+            rm "$RUNNER_TEMP/dl/$tag.tar.gz"
+            echo "- $tag" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Check Pages limits
+        run: |
+          files=$(find "$RUNNER_TEMP/site" -type f | wc -l)
+          largest=$(find "$RUNNER_TEMP/site" -type f -printf '%s %p\n' | sort -n | tail -1)
+          echo "Pages upload: $files files, largest: ${largest%% *} bytes" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$files" -gt 20000 ] || [ "${largest%% *}" -gt $((25 * 1024 * 1024)) ]; then
+            echo "::error::Over the Cloudflare Pages limits (20,000 files, 25 MiB per file)."
+            exit 1
+          fi
+
+      - uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.149.0'
+          # Create the Pages project on first deploy; no-op once it exists.
+          # The action runs each line separately, so this must stay one line.
+          preCommands: npx wrangler pages project list | grep -qw balkon-daten || npx wrangler pages project create balkon-daten --production-branch=main
+          command: pages deploy ${{ runner.temp }}/site --project-name=balkon-daten --branch=main

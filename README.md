@@ -19,6 +19,7 @@ and [ATTRIBUTION.md](ATTRIBUTION.md) (data sources and their licences).
 | `contract/` | Constants and a golden data release shared with the app's tests |
 | `docs/data-contract.md` | The release format |
 | `.github/workflows/data.yml` | Builds a release and publishes it as a GitHub release `data-<id>` |
+| `.github/workflows/data-deploy.yml`, `site/` | Serves the newest releases from Cloudflare Pages |
 
 ## Running locally
 
@@ -43,3 +44,15 @@ Python dependencies: direct ones in `pipeline/requirements.in`;
 `uv pip compile` command given at the top of `requirements.in`. The Python
 parts (tests, ruff, basemap and address steps) also run on Windows in a plain
 Python 3.12 venv; only tippecanoe needs Linux.
+
+## Data site
+
+`Data Deploy` (`.github/workflows/data-deploy.yml`) puts the newest two data
+releases on the Cloudflare Pages project `balkon-daten`
+(`https://balkon-daten.pages.dev/releases/<id>/…`, headers in
+`site/_headers`: CORS for any origin, `immutable` caching, `noindex`). It
+runs after every successful Data run on `main`, or by hand. One-time setup:
+add `CLOUDFLARE_API_TOKEN` (Account → Cloudflare Pages → Edit) and
+`CLOUDFLARE_ACCOUNT_ID` as secrets of the environment `data-pages` (Settings →
+Environments), which only `main` can use. The app reads the data from there
+once its repository variable `DATA_BASE_URL` points to the site.

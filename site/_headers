@@ -1,0 +1,13 @@
+# Cloudflare Pages headers for the data site (balkon-daten.pages.dev).
+# Public open data, read by the app from another origin: any origin may read
+# it (no cookies or credentials are involved), so preview deployments of the
+# app work too. Not for search engines.
+/*
+  Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Robots-Tag: noindex
+
+# A release never changes: a new one gets a new folder.
+/releases/*
+  Cache-Control: public, max-age=31536000, immutable
