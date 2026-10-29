@@ -39,7 +39,9 @@ releases/<id>/                      id = yyyymmdd-hhmm-<commit>
   manifest.json
   buildings.pmtiles.chunks/000000.bin …   (or buildings.pmtiles, whole)
   basemap.pmtiles.chunks/000000.bin …
-  analysis/<EEE>_<NNNN>.json
+  analysis/<EEE>_<NNNN>.json           (format v2, one file per tile)
+  analysis/index.json                 (format v3: tile → piece, offset, length)
+  analysis/pieces/<sha256:16>.bin      (format v3: ~1 MiB of gzip members)
   addresses.json
 ```
 
@@ -57,6 +59,7 @@ copy of the release's manifest (decision 0009).
 | `tiles`                         | string[]       | processed tile keys                                              |
 | `pmtiles`                       | string \| null | building archive name                                            |
 | `analysisPath`                  | string         | path template with `{tile}`                                      |
+| `analysisIndex`                 | string | absent | v3 index (`analysis/index.json`); absent = v2 only            |
 | `attribution`                   | HTML           | LoD2 credit with the data year                                   |
 | `basemap`, `basemapAttribution` | string \| null | basemap archive and credit                                       |
 | `addresses`                     | string \| null | address index file                                               |
@@ -81,6 +84,30 @@ copy of the release's manifest (decision 0009).
 
 Coordinates in metres relative to `origin` (cm precision). A building
 belongs to exactly one tile and is not clipped at its edge.
+
+## Packed analysis tiles (format version 3)
+
+The same content as v2, written by `lod2pipe.pack` from the v2 tiles; the
+encoding is described at the top of `pipeline/lod2pipe/pack.py`. In short:
+one gzip member per tile (LEB128 varints, zig-zag for signed values,
+centimetres, ring points as deltas, roof z relative to `groundZ`, closed
+rings without their repeated last point), members concatenated in Hilbert
+order into pieces of at most 1 MiB (`analysisPieceSize`; a bigger tile gets
+a piece of its own), pieces named by the first 16 hex digits of their
+SHA-256.
+
+```jsonc
+// analysis/index.json
+{
+  "format": "balkon-lod2-prisms", "version": 3,
+  "pieces": ["49fe4aaeaa0280e5.bin"],
+  "tiles": { "356_5644": [0, 0, 327] }   // [piece, byte offset, byte length]
+}
+```
+
+Decoding gives exactly the v2 values (cm integers divided by 100), so v2
+and v3 give identical horizons. Releases carry both while app versions
+without v3 are still in use.
 
 ## Display tiles (`buildings.pmtiles`)
 

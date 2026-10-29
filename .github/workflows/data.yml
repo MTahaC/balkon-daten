@@ -69,6 +69,12 @@ jobs:
         working-directory: pipeline
         run: .venv/bin/python -m lod2pipe.chunks "$RUNNER_TEMP/release" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Analysis format v3 next to the v2 JSON tiles (app versions before v3
+      # keep reading the JSON).
+      - name: Pack analysis tiles
+        working-directory: pipeline
+        run: .venv/bin/python -m lod2pipe.pack "$RUNNER_TEMP/release" | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The asset holds releases/<id>/…, the layout below /data/ on the site.
       - name: Package and check Pages limits
         run: |

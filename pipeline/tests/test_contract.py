@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import lod2pipe.__main__ as cli
-from lod2pipe import addresses, export
+from lod2pipe import addresses, export, pack
 from lod2pipe.chunks import DEFAULT_SIZE, chunk_dir, chunk_name, chunk_release
 from lod2pipe.fetch import IndexEntry
 from lod2pipe.tiles import TILE_SIZE_M, TileId, with_neighbours
@@ -51,6 +51,9 @@ def test_constants_match_the_contract():
     assert TILE_SIZE_M == CONTRACT["tileSizeM"]
     assert export.ANALYSIS_FORMAT == CONTRACT["analysisFormat"]
     assert export.ANALYSIS_VERSION == CONTRACT["analysisVersion"]
+    assert pack.PACKED_VERSION == CONTRACT["analysisPackedVersion"]
+    assert pack.PIECE_SIZE == CONTRACT["analysisPieceSize"]
+    assert pack.INDEX_NAME == CONTRACT["analysisIndex"]
     assert addresses.FORMAT == CONTRACT["addressFormat"]
     assert addresses.VERSION == CONTRACT["addressVersion"]
     assert cli.LAYER == CONTRACT["displayLayer"]
@@ -94,6 +97,7 @@ def build_release(out: Path, work: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         ]
     )  # fmt: skip
     chunk_release(out, FIXTURE_PIECE_SIZE)
+    pack.pack_release(out)
     manifest_path = out / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["generatedAt"] = GENERATED_AT
