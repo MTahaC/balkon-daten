@@ -100,7 +100,7 @@ SHA-256.
 // analysis/index.json
 {
   "format": "balkon-lod2-prisms", "version": 3,
-  "pieces": ["49fe4aaeaa0280e5.bin"],
+  "pieces": ["03db656e019714ec.bin"],
   "tiles": { "356_5644": [0, 0, 327] }   // [piece, byte offset, byte length]
 }
 ```
