@@ -56,13 +56,15 @@ copy of the release's manifest (decision 0009).
 | `release`                       | string \| null | release id (files under `releases/<id>/`); null for local builds |
 | `coverage`                      | string \| null | covered area for texts ("Köln")                                  |
 | `bounds`                        | [w, s, e, n]   | WGS84 box of all tiles                                           |
-| `tiles`                         | string[]       | processed tile keys                                              |
+| `tiles`                         | string[]       | processed tile keys; empty when `tilesFromIndex`                 |
+| `tilesFromIndex`                | true \| absent | the tile keys are those of the v3 index (all of NRW: ~35k)       |
 | `pmtiles`                       | string \| null | building archive name                                            |
 | `analysisPath`                  | string         | path template with `{tile}`                                      |
 | `analysisIndex`                 | string | absent | v3 index (`analysis/index.json`); absent = v2 only            |
 | `attribution`                   | HTML           | LoD2 credit with the data year                                   |
 | `basemap`, `basemapAttribution` | string \| null | basemap archive and credit                                       |
-| `addresses`                     | string \| null | address index file                                               |
+| `addresses`                     | string \| null | single-file address index                                        |
+| `addressStreets`                | string \| absent | street list of the split address index (`addresses/streets.json`) |
 | `chunks`                        | object \| null | `{size, archives: {name: bytes}}`; null = whole archives         |
 
 ## Analysis tile (`balkon-lod2-prisms`, version 2)
@@ -136,6 +138,26 @@ out (decision 0011).
         ["1", "a", 30.0, 15.0],
       ],
     ],
+  ],
+}
+```
+
+## Split address index (`balkon-streets`, version 1)
+
+For a whole state (`lod2pipe.merge --addresses`): `addresses/streets.json`
+lists every municipality with its street names; each municipality's house
+numbers are a single-file address index (above) in
+`addresses/<sha256-16>.json`, next to the street list. The app loads the
+street list first and a municipality's numbers when it needs them.
+
+```jsonc
+{
+  "format": "balkon-streets",
+  "version": 1,
+  "crs": "EPSG:25832",
+  // [municipality, numbers file, [minE, minN, maxE, maxN] of its addresses, [street, …]]
+  "municipalities": [
+    ["Köln", "0123456789abcdef.json", [343000, 5635000, 370000, 5662000], ["Heumarkt"]],
   ],
 }
 ```
