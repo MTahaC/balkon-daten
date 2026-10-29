@@ -24,6 +24,17 @@ jobs:
       - run: python -m venv .venv && .venv/bin/pip install --quiet --require-hashes -r requirements.txt
       - run: .venv/bin/ruff check . && .venv/bin/ruff format --check .
       - run: .venv/bin/pytest -q
+      # The golden files are Linux output (zlib bytes differ elsewhere): after a
+      # deliberate format change, take the regenerated ones from this artifact.
+      - name: Regenerate the golden release
+        if: failure()
+        run: UPDATE_CONTRACT=1 .venv/bin/pytest -q tests/test_contract.py
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: contract-fixtures
+          path: contract/fixtures/
+          retention-days: 7
       # Known vulnerabilities in any pinned package.
       - uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
         with:
