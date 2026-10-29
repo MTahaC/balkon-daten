@@ -23,6 +23,8 @@ permissions:
 
 jobs:
   data:
+    # Releases are built from main only; this job holds a write token.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
