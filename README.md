@@ -67,6 +67,7 @@ pieces (`lod2pipe.pack`). At most `parallel` shards (default 8) download
 from the portal at once; downloads are retried 8 times with backoff. Each
 shard uploads `analysis-shard-<i>` (pieces, index, manifest; 14 days), and
 the summary job adds up tiles, pieces, size and the slowest shard. A failed
-shard can be re-run on its own ("Re-run failed jobs"). Merging the shards
-into a data release, with the address index per municipality, is a
-separate step.
+shard can be re-run on its own ("Re-run failed jobs"). `Data NRW release`
+(by hand, with that run's id) merges the shards into one release
+(`lod2pipe.merge`: one index, no tile list in the manifest) and adds the
+address index split per municipality; Data Deploy then puts it online.

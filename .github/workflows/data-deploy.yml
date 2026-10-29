@@ -3,14 +3,15 @@ name: Data Deploy
 # Puts the newest two data releases (GitHub releases "data-<id>") on the
 # Cloudflare Pages project "balkon-daten": releases/<id>/… plus site/_headers.
 # Two, so app versions still built for the previous release keep working
-# until they update. Runs after a successful Data run on main, or by hand.
+# until they update. Runs after a successful Data or Data NRW release run on
+# main, or by hand.
 # Needs the secrets CLOUDFLARE_API_TOKEN (Account > Cloudflare Pages > Edit)
 # and CLOUDFLARE_ACCOUNT_ID in the environment "data-pages", which only
 # main may use.
 
 on:
   workflow_run:
-    workflows: [Data]
+    workflows: [Data, Data NRW release]
     types: [completed]
     branches: [main]
   workflow_dispatch:

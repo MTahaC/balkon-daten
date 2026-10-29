@@ -1,0 +1,104 @@
+name: Data NRW release
+
+# Merges the shards of a finished Data NRW run into one data release:
+# analysis pieces with one index (lod2pipe.merge) and the address index
+# split per municipality, then publishes it as the GitHub release
+# "data-<id>" like Data does. Data Deploy puts it on the data site
+# afterwards. Started by hand with the run id of the Data NRW run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id of the Data NRW run whose shard artifacts to merge
+        required: true
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the data release
+  actions: read # download the artifacts of the other run
+
+jobs:
+  release:
+    # Releases are built from main only; this job holds a write token.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Python venv
+        working-directory: pipeline
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet --require-hashes -r requirements.txt
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: pipeline/.cache/gebref_EPSG25832_ASCII.zip
+          key: gebref-${{ hashFiles('pipeline/lod2pipe/addresses.py') }}
+
+      - name: Download the shards
+        run: |
+          case "$RUN_ID" in ''|*[!0-9]*) echo "::error::run_id must be a number"; exit 1;; esac
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern 'analysis-shard-*' --dir "$RUNNER_TEMP/shards"
+          expected=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs -q '[.jobs[] | select(.name | startswith("shard"))] | length')
+          got=$(ls "$RUNNER_TEMP/shards" | wc -l)
+          echo "shards: $got of $expected" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$got" -ne "$expected" ]; then
+            echo "::error::Only $got of $expected shards have artifacts; re-run the failed shards first."
+            exit 1
+          fi
+
+      - name: Release id
+        run: echo "RELEASE=$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Merge shards and addresses
+        working-directory: pipeline
+        run: >-
+          .venv/bin/python -m lod2pipe.merge "$RUNNER_TEMP/release"
+          "$RUNNER_TEMP"/shards/analysis-shard-*/shard-*
+          --release "$RELEASE"
+          --addresses .cache
+          | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The asset holds releases/<id>/…, the layout below /data/ on the site.
+      - name: Package and check Pages limits
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg/releases"
+          mv "$RUNNER_TEMP/release" "$RUNNER_TEMP/pkg/releases/$RELEASE"
+          dir="$RUNNER_TEMP/pkg/releases/$RELEASE"
+          files=$(find "$dir" -type f | wc -l)
+          largest=$(find "$dir" -type f -printf '%s %P\n' | sort -n | tail -1)
+          {
+            echo "### Release $RELEASE (Nordrhein-Westfalen)"
+            echo
+            echo "- files: $files (Pages allows 20,000 per site, including the previous release)"
+            echo "- largest file: $(( ${largest%% *} / 1024 )) KiB, ${largest#* } (Pages: 25 MiB)"
+            echo "- analysis pieces: $(ls "$dir/analysis/pieces" | wc -l), $(( $(du -sb "$dir/analysis" | cut -f1) / 1000000 )) MB"
+            echo "- analysis index: $(( $(stat -c %s "$dir/analysis/index.json") / 1000 )) kB"
+            echo "- addresses: $(ls "$dir/addresses" | wc -l) files, $(( $(du -sb "$dir/addresses" | cut -f1) / 1000000 )) MB, street list $(( $(stat -c %s "$dir/addresses/streets.json") / 1000 )) kB"
+            echo "- total: $(du -sh "$dir" | cut -f1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$files" -gt 15000 ] || [ "${largest%% *}" -gt $((25 * 1024 * 1024)) ]; then
+            echo "::error::Release exceeds the Cloudflare Pages limits (files or file size)."
+            exit 1
+          fi
+          tar -C "$RUNNER_TEMP/pkg" -czf "$RUNNER_TEMP/data-$RELEASE.tar.gz" releases
+          echo "- asset: $(du -h "$RUNNER_TEMP/data-$RELEASE.tar.gz" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish data release
+        run: |
+          gh release create "data-$RELEASE" "$RUNNER_TEMP/data-$RELEASE.tar.gz" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Data $RELEASE (Nordrhein-Westfalen)" \
+            --notes "Data release for all of NRW, merged from Data NRW run $RUN_ID at ${GITHUB_SHA::7}. Deploy uses the newest data-* release."

@@ -16,6 +16,7 @@ nothing to place a balcony on elsewhere.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import io
 import json
 import re
@@ -25,6 +26,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from .export import write_json
 from .fetch import _open
 from .tiles import TileId
 
@@ -147,3 +149,49 @@ def read_gebref(zip_path: Path) -> Iterator[Address]:
         for line in io.TextIOWrapper(raw, encoding="utf-8"):
             if (a := parse_line(line)) is not None:
                 yield a
+
+
+STREETS_FORMAT = "balkon-streets"
+STREETS_VERSION = 1
+STREETS_NAME = "addresses/streets.json"
+
+
+def write_split(addresses: Iterable[Address], out: Path) -> dict:
+    """The address index split for a whole state: OUT/addresses/streets.json
+    lists every municipality (name, house-number file, bounding box in
+    EPSG:25832) with its street names; OUT/addresses/<hash>.json holds one
+    municipality's house numbers in the single-file format (build_index).
+    The app loads the street list first and a municipality's numbers only
+    when they are needed. Returns the street list."""
+    by_town: dict[str, list[Address]] = {}
+    for a in addresses:
+        by_town.setdefault(a.municipality, []).append(a)
+    folder = out / "addresses"
+    folder.mkdir(parents=True, exist_ok=True)
+    towns = []
+    for name, found in sorted(by_town.items()):
+        tiles = sorted({TileId.containing(a.e, a.n) for a in found})
+        data = json.dumps(
+            build_index(found, tiles), ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        # Content-hashed like the analysis pieces: immutable, cacheable.
+        file = f"{hashlib.sha256(data).hexdigest()[:16]}.json"
+        (folder / file).write_bytes(data)
+        es, ns = [a.e for a in found], [a.n for a in found]
+        towns.append(
+            [
+                name,
+                file,
+                [round(min(es)), round(min(ns)), round(max(es)), round(max(ns))],
+                sorted({a.street for a in found}),
+            ]
+        )
+    streets = {
+        "format": STREETS_FORMAT,
+        "version": STREETS_VERSION,
+        "crs": "EPSG:25832",
+        # [municipality, numbers file (next to this file), [minE, minN, maxE, maxN], [street, …]]
+        "municipalities": towns,
+    }
+    write_json(out / STREETS_NAME, streets)
+    return streets
