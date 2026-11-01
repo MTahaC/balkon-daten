@@ -5,5 +5,5 @@ lxml==6.1.3
 numpy==2.5.4
 pyproj==3.8.0
 shapely==2.2.0
-pytest==9.1.1
-ruff==0.17.2
+pytest==9.2.0
+ruff==0.17.3
